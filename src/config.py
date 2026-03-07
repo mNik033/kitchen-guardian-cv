@@ -10,3 +10,7 @@ CAMERA_INDEX = 0
 
 # Detection settings
 CONFIDENCE_THRESHOLD = 0.7
+
+# Safe Zones Settings
+BURNER_RADIUS_PIXELS = 100
+BURNERS_FILE = "burner_zones.json"

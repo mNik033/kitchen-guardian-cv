@@ -1,8 +1,48 @@
 import cv2
 import time
-from src.config import CAMERA_INDEX
+import json
+import os
+from src.config import CAMERA_INDEX, BURNER_RADIUS_PIXELS, BURNERS_FILE
 from src.detectors import VisionSystem
 from src.state_machine import SafetyGuardian
+
+burner_zones = []
+mock_flame_pos = None
+
+def load_burners():
+    global burner_zones
+    if os.path.exists(BURNERS_FILE):
+        try:
+            with open(BURNERS_FILE, 'r') as f:
+                burner_zones = json.load(f)
+            print(f"Loaded {len(burner_zones)} burner zones.")
+        except Exception as e:
+            print(f"Failed to load burners: {e}")
+
+def save_burners():
+    try:
+        with open(BURNERS_FILE, 'w') as f:
+            json.dump(burner_zones, f)
+        print(f"Saved {len(burner_zones)} burner zones to {BURNERS_FILE}.")
+    except Exception as e:
+        print(f"Failed to save burners: {e}")
+
+def handle_mouse_events(event, x, y, flags, param):
+    global burner_zones, mock_flame_pos
+    
+    if event == cv2.EVENT_LBUTTONDOWN:
+        # Add a new burner zone
+        burner_zones.append((x, y))
+        print(f"Added Burner Zone at ({x}, {y})")
+        
+    elif event == cv2.EVENT_RBUTTONDOWN:
+        # Clear all burner zones
+        burner_zones = []
+        print("Cleared all Burner Zones.")
+        
+    elif event == cv2.EVENT_MOUSEMOVE:
+        # Track mouse for mock flame if active
+        mock_flame_pos = (x, y)
 
 def main():
     # Initialize Camera
@@ -17,11 +57,22 @@ def main():
     print("Initializing Safety Guardian...")
     guardian = SafetyGuardian()
 
+    # Load previously saved burners
+    load_burners()
+
     # Mock flame state
     mock_flame_active = False
 
-    print("System detection started. Press 'q' to quit.")
-    print("Press 'f' to toggle mock flame.")
+    print("System detection started.")
+    print("UI Controls:")
+    print(" - Left Click: Add Burner Center")
+    print(" - Right Click: Clear All Burners")
+    print(" - Press 's': Save Burners to File")
+    print(" - Press 'f': Toggle Mock Flame (follows mouse)")
+    print(" - Press 'q': Quit")
+
+    cv2.namedWindow('Kitchen Guardian')
+    cv2.setMouseCallback('Kitchen Guardian', handle_mouse_events)
 
     try:
         while True:
@@ -30,18 +81,35 @@ def main():
                 print("Error: Failed to capture frame.")
                 break
 
-            # 1. Detect Objects
-            detection_result = vision_system.detect_objects(frame)
-            
-            # Override flame detection with mock state
-            # In a real system, detection_result['flame_detected'] would come from the model
-            detection_result['flame_detected'] = mock_flame_active
+            # Generate the mock flame box if active
+            current_mock_box = None
+            if mock_flame_active and mock_flame_pos:
+                mx, my = mock_flame_pos
+                # Create a 50x50 box around the mouse cursor
+                current_mock_box = [mx - 25, my - 25, mx + 25, my + 25]
+
+            # 1. Detect Objects & Validate Zones
+            detection_result = vision_system.detect_objects(
+                frame=frame, 
+                burner_zones=burner_zones, 
+                mock_flame_box=current_mock_box
+            )
 
             # 2. Update Safety Status
-            status = guardian.update_status(
-                flame_on=detection_result['flame_detected'],
-                person_present=detection_result['person_detected']
-            )
+            # If the fire is NOT safe spatially, we override the temporal state machine
+            is_safe_fire = detection_result['is_safe_fire']
+            
+            if detection_result['flame_detected'] and not is_safe_fire:
+                # Immediate danger branch
+                status = "CRITICAL_SHUTOFF"
+                guardian.update_status(flame_on=True, person_present=detection_result['person_detected']) 
+                # Override the returned status because spatial logic supersedes temporal logic
+            else:
+                # Normal temporal logic
+                status = guardian.update_status(
+                    flame_on=detection_result['flame_detected'],
+                    person_present=detection_result['person_detected']
+                )
 
             # 3. Visualization
             # Draw Bounding Boxes
@@ -52,6 +120,13 @@ def main():
                 cv2.putText(frame, f"{item['class']} {item['conf']:.2f}", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
+            # Draw Burner Zones
+            for (zx, zy) in burner_zones:
+                # Draw the radius
+                cv2.circle(frame, (zx, zy), BURNER_RADIUS_PIXELS, (255, 150, 0), 2)
+                # Draw the center point
+                cv2.circle(frame, (zx, zy), 4, (255, 150, 0), -1)
+
             # Draw Status Info
             # Top Left: System Status
             status_color = (0, 255, 0) # Green for SAFE
@@ -60,8 +135,12 @@ def main():
             elif status == "CRITICAL_SHUTOFF":
                 status_color = (0, 0, 255) # Red
 
-            cv2.putText(frame, f"STATUS: {status}", (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, status_color, 2)
+            warning_text = ""
+            if detection_result['flame_detected'] and not is_safe_fire:
+                warning_text = " (FIRE OUTSIDE SAFE ZONE)"
+
+            cv2.putText(frame, f"STATUS: {status}{warning_text}", (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
             
             # Draw Flame Status
             flame_text = "FLAME: ON" if mock_flame_active else "FLAME: OFF"
@@ -81,6 +160,8 @@ def main():
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
+            elif key == ord('s'):
+                save_burners()
             elif key == ord('f'):
                 mock_flame_active = not mock_flame_active
                 print(f"Mock Flame toggled: {mock_flame_active}")
