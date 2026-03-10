@@ -10,23 +10,36 @@ class SafetyGuardian:
         self.last_person_seen_time = time.time()
         self.state = "SAFE"
 
-    def update_status(self, flame_on: bool, person_present: bool) -> Literal["SAFE", "WARNING", "CRITICAL_SHUTOFF"]:
+    def update_status(self, flame_on: bool, person_present: bool, growth_status: str = "SAFE") -> Literal["SAFE", "WARNING", "CRITICAL_SHUTOFF"]:
         """
-        Update the safety status based on flame and person presence.
+        Update the safety status based on flame, person presence, and flame growth.
         
         Args:
             flame_on: Whether a flame is detected.
             person_present: Whether a person is detected.
+            growth_status: The spatial/temporal growth status ("SAFE", "GROWTH_WARNING", "GROWTH_CRITICAL").
             
         Returns:
             Current state: "SAFE", "WARNING", or "CRITICAL_SHUTOFF"
         """
         current_time = time.time()
 
+        # 1. Growth/Spatial Logic Override
+        # Immediate shutoff if flame growth is critical, regardless of human presence.
+        if growth_status == "GROWTH_CRITICAL":
+            self.state = "CRITICAL_SHUTOFF"
+            return "CRITICAL_SHUTOFF"
+        
+        # Allow a WARNING to be issued even if a person is present to alert them to the growth
+        person_override_status = "SAFE"
+        if growth_status == "GROWTH_WARNING":
+            person_override_status = "WARNING"
+
+        # 2. Unattended Person Logic
         if person_present:
             self.last_person_seen_time = current_time
-            self.state = "SAFE"
-            return "SAFE"
+            self.state = person_override_status
+            return person_override_status
 
         # If no person is present, check flame status
         if flame_on:

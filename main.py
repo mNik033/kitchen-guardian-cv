@@ -5,6 +5,7 @@ import os
 from src.config import CAMERA_INDEX, BURNER_RADIUS_PIXELS, BURNERS_FILE
 from src.detectors import VisionSystem
 from src.state_machine import SafetyGuardian
+from src.temporal import FlameTracker
 
 burner_zones = []
 mock_flame_pos = None
@@ -56,6 +57,8 @@ def main():
     vision_system = VisionSystem()
     print("Initializing Safety Guardian...")
     guardian = SafetyGuardian()
+    print("Initializing Flame Tracker...")
+    flame_tracker = FlameTracker()
 
     # Load previously saved burners
     load_burners()
@@ -95,20 +98,25 @@ def main():
                 mock_flame_box=current_mock_box
             )
 
-            # 2. Update Safety Status
+            # Filter boxes to only contain flames
+            flame_boxes = [box for box in detection_result['boxes'] if box['class'] == 'flame']
+            
+            # Update temporal logic (Growth tracking)
+            growth_status = flame_tracker.update(flame_boxes)
             # If the fire is NOT safe spatially, we override the temporal state machine
             is_safe_fire = detection_result['is_safe_fire']
             
             if detection_result['flame_detected'] and not is_safe_fire:
                 # Immediate danger branch
                 status = "CRITICAL_SHUTOFF"
-                guardian.update_status(flame_on=True, person_present=detection_result['person_detected']) 
+                guardian.update_status(flame_on=True, person_present=detection_result['person_detected'], growth_status=growth_status) 
                 # Override the returned status because spatial logic supersedes temporal logic
             else:
                 # Normal temporal logic
                 status = guardian.update_status(
                     flame_on=detection_result['flame_detected'],
-                    person_present=detection_result['person_detected']
+                    person_present=detection_result['person_detected'],
+                    growth_status=growth_status
                 )
 
             # 3. Visualization
@@ -153,6 +161,20 @@ def main():
             cv2.putText(frame, person_text, (20, 110),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
+            # Draw Flame Growth Stats
+            stats = flame_tracker.get_stats()
+            if stats['established']:
+                # Calculate current area
+                current_area = sum(flame_tracker._calculate_area(b['box']) for b in flame_boxes)
+                stats_text = f"FLAME AREA: {current_area:.0f} (Base: {stats['baseline_area']:.0f})"
+                if growth_status != "SAFE":
+                    stats_text += f" [{growth_status}]"
+                
+                # Make text red if warning/critical
+                stats_color = (0, 0, 255) if growth_status != "SAFE" else (255, 255, 255)
+                cv2.putText(frame, stats_text, (20, 140),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, stats_color, 2)
+
             # Show Frame
             cv2.imshow('Kitchen Guardian', frame)
 
@@ -165,6 +187,8 @@ def main():
             elif key == ord('f'):
                 mock_flame_active = not mock_flame_active
                 print(f"Mock Flame toggled: {mock_flame_active}")
+                if not mock_flame_active:
+                    flame_tracker.reset()
 
     except KeyboardInterrupt:
         print("Stopping system...")
