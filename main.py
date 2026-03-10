@@ -102,7 +102,7 @@ def main():
             flame_boxes = [box for box in detection_result['boxes'] if box['class'] == 'flame']
             
             # Update temporal logic (Growth tracking)
-            growth_status = flame_tracker.update(flame_boxes)
+            growth_status = flame_tracker.update(flame_boxes, person_present=detection_result['person_detected'])
             # If the fire is NOT safe spatially, we override the temporal state machine
             is_safe_fire = detection_result['is_safe_fire']
             
@@ -163,10 +163,10 @@ def main():
 
             # Draw Flame Growth Stats
             stats = flame_tracker.get_stats()
-            if stats['established']:
-                # Calculate current area
-                current_area = sum(flame_tracker._calculate_area(b['box']) for b in flame_boxes)
-                stats_text = f"FLAME AREA: {current_area:.0f} (Base: {stats['baseline_area']:.0f})"
+            if stats['baseline_area'] > 0:
+                stats_text = f"FLAME AREA: {stats['smoothed_current']:.0f} (Base: {stats['baseline_area']:.0f})"
+                if stats['locked']:
+                    stats_text += " [LOCKED]"
                 if growth_status != "SAFE":
                     stats_text += f" [{growth_status}]"
                 
