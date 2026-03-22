@@ -1,8 +1,56 @@
-# System Architecture
+# Kitchen Guardian Architecture
 
-## Class Diagram
+This document describes the hardware and software architecture for the *Kitchen Guardian* IoT project.
 
-This diagram illustrates the structure of the *Kitchen Guardian* system, showing the relationships between the main execution loop, the vision system, and the safety state machine.
+## High-Level Architecture (Hardware + Software)
+
+The system is composed of physical sensors, an edge compute device (like a Raspberry Pi), actuators to control the stove, and an alert system. The diagram below illustrates how components are connected and how data flows through the system.
+
+```mermaid
+graph LR
+  subgraph Inputs ["Sensors & Power"]
+    Camera["Camera<br/>(USB / Pi Camera)"]
+    MQ6["MQ-6 Gas Sensor<br/>(LPG / Butane)"]
+    ADC["ADC<br/>(MCP3008 / ADS1115)"]
+    PSU["Power Supply<br/>(5-6V for Servo)"]
+  end
+  
+  subgraph Edge ["Edge Device"]
+    GPIO["Hardware I/O<br/>(GPIO / I²C)"]
+    Vision["VisionSystem<br/>(YOLOv8 Object Detection)"]
+    Safety["SafetyGuardian<br/>(Decision Logic)"]
+  end
+  
+  subgraph Outputs ["Actuators & Remote"]
+    Servo["Servo Motor<br/>(Stove Knob Controller)"]
+    Mobile["Mobile App / Cloud Alerting"]
+  end
+
+  %% Data Flow
+  Camera -->|Video Frames| Vision
+  MQ6 -->|Analog Signal| ADC
+  ADC -->|I²C / SPI| GPIO
+  
+  GPIO -->|Sensor Data| Safety
+  Vision -->|Detections| Safety
+  
+  Safety -->|KILL Command| GPIO
+  GPIO -->|PWM Control| Servo
+  
+  Safety -->|Status/Telemetry| Mobile
+  
+  %% Power Flow
+  PSU -.->|Power| Servo
+  PSU -.->|Power| Edge
+```
+
+---
+
+## Software Architecture
+
+### Class Diagram
+
+The class diagram shows the structure of the Python application (`main.py`) which acts as the "Brain" on the edge device, unifying the Vision and Safety systems.
 
 ```mermaid
 classDiagram
@@ -40,9 +88,9 @@ classDiagram
     SafetyGuardian ..> Config : uses
 ```
 
-## Sequence Diagram
+### Sequence Diagram
 
-This diagram shows the runtime flow of a single frame processing cycle within the application loop.
+The sequence diagram illustrates the main event loop running on the edge device, checking for humans and flames on every frame, and triggering state changes based on elapsed time.
 
 ```mermaid
 sequenceDiagram

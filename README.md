@@ -1,34 +1,44 @@
-# Computer Vision Pipeline for the IoT Project: Kitchen Guardian
+# Kitchen Guardian: Smart Retrofit Stove Safety
 
-## High-Level Architecture (Hardware + Software)
+An IoT safety device that monitors a stove using Computer Vision. The system runs on an edge device (like a Raspberry Pi or Android device) and uses a camera to detect people and flames. It applies a State Machine (future revisions plan to improve upon this) to track unattended cooking and ensure safety.
 
-The following diagram illustrates the **end to end architecture** of *Kitchen Guardian*, showing how hardware components interface with the computer vision pipeline and the safety decision logic running on the edge device.
+---
 
+## Getting Started
 
-```mermaid
-graph LR
-  subgraph HW [Hardware Layer]
-    Camera["Camera<br/>USB or Pi Camera"]
-    MQ6["MQ-6 Gas Sensor<br/>(LPG / Butane)"]
-    ADC["ADC<br/>(MCP3008 / ADS1115)"]
-    Servo["Servo Motor<br/>(MG996R or similar)"]
-    PSU["Power Supply<br/>(5–6V for servo)"]
-  end
-  
-  subgraph EDGE [Edge Device]
-    Pi["Raspberry Pi / Android"]
-    Vision["VisionSystem<br/>(Fire & Person Detection)"]
-    Safety["SafetyGuardian<br/>(Decision Logic)"]
-  end
+1. Create a virtual environment and activate it:
+```bash
+python -m venv venv
+source venv/bin/activate
+```
 
-  Mobile["Mobile App / Cloud"]
+2. Install the dependencies:
+```bash
+pip install -r requirements.txt
+```
 
-  Camera -->|Video Frames| Vision
-  Vision --> Safety
-  MQ6 -->|Analog Signal| ADC
-  ADC -->|I²C / SPI| Pi
-  Safety -->|KILL / STATUS| Pi
-  Pi -->|PWM / I²C PWM| Servo
-  PSU --> Servo
-  PSU --> Pi
-  Pi -->|Alerts / Telemetry| Mobile
+3. Run the edge detection application:
+```bash
+python main.py
+```
+
+---
+
+## Planned Architecture & Features
+
+The long-term vision focuses on building a robust, context-aware safety system that separates the edge computing layer from the physical actuation layer while incorporating advanced logic to understand the cooking context.
+
+### 1. Hardware Actuation
+- **Non-Invasive Control**: A motorized clamp mechanism that attaches to the existing stove knob, requiring no permanent modifications to the stove. 
+- **Emergency Shutoff**: Capable of physically rotating the knob to the "OFF" position when a critical danger is confirmed.
+
+### 2. Advanced Vision Intelligence
+- **Safe Zones (Spatial Logic)**: The vision system will map the camera's view to differentiate between a flame safely contained *inside* the stove’s bounds versus a flame spreading *outside* limits.
+- **Temporal Logic (Flame Growth Rate)**: Accidental fires grow rapidly. By tracking the area and growth rate of the flame over time, the system will quickly distinguish normal cooking activity from an escalating emergency.
+
+### 3. Remote Monitoring
+- A remote dashboard interface enabling users to view system status, receive safety alerts in real time, and trigger a manual emergency shutoff if necessary.
+
+---
+
+For deeper technical details, including software Class Diagrams and Sequence Diagrams of the current logic, please see the [Architecture Documentation](docs/architecture.md).
