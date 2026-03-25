@@ -181,7 +181,7 @@ def main():
             is_safe_fire = detection_result['is_safe_fire']
             
             if (detection_result["dangerous_fire"] or detection_result["flame_detected"]) and not is_safe_fire:
-                status = "CRITICAL_SHUTOFF"
+                status = "CRITICAL_SHUTOFF (OUTSIDE SAFE ZONE)"
 
             # 3. Visualization
             # Draw Bounding Boxes

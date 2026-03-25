@@ -83,7 +83,7 @@ class VideoProcessor(VideoProcessorBase):
         
         # Override rules
         if (detection_result["dangerous_fire"] or detection_result["flame_detected"]) and not detection_result['is_safe_fire']:
-            status = "CRITICAL_SHUTOFF"
+            status = "CRITICAL_SHUTOFF (OUTSIDE SAFE ZONE)"
             
         if manual_shutoff:
             status = "CRITICAL_SHUTOFF (MANUAL)"
