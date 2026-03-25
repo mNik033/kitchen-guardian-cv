@@ -197,6 +197,12 @@ def main():
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(frame, f"{item['class']} {item['conf']:.2f}", (x1, y1 - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+                # Draw the spatial anchor point if we computed it (for flames/fires)
+                if "anchor_point" in item:
+                    ax, ay = item["anchor_point"]
+                    # Draw a tiny magenta dot to represent where the flame is anchored
+                    cv2.circle(frame, (ax, ay), 4, (255, 0, 255), -1)
 
             # Draw Burner Zones
             for (zx, zy) in burner_zones:

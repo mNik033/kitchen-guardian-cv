@@ -148,7 +148,9 @@ class VisionSystem:
 
             for item in heat_boxes:
 
-                center = calculate_center(item["box"])
+                # Use bottom anchor because tall flames originate from the pan
+                center = calculate_center(item["box"], anchor="bottom")
+                item["anchor_point"] = center
 
                 if not is_point_in_zones(center, burner_zones, BURNER_RADIUS_PIXELS):
                     is_safe_fire = False

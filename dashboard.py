@@ -111,6 +111,11 @@ class VideoProcessor(VideoProcessorBase):
             cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
             cv2.putText(img, f"{item['class']} {item['conf']:.2f}", (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            
+            # Draw the magenta spatial anchor point so user sees the flame origin
+            if "anchor_point" in item:
+                ax, ay = item["anchor_point"]
+                cv2.circle(img, (ax, ay), 4, (255, 0, 255), -1)
 
         for (zx, zy) in self.burner_zones:
             cv2.circle(img, (zx, zy), BURNER_RADIUS_PIXELS, (255, 150, 0), 2)
