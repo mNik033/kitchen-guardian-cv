@@ -64,9 +64,9 @@ def draw_status_panel(frame, status, detection_result, growth_status, flame_trac
         y += line_gap
 
     status_color = (0, 255, 0)
-    if status == "WARNING":
+    if "WARNING" in status:
         status_color = (0, 255, 255)
-    elif status == "CRITICAL_SHUTOFF":
+    elif "CRITICAL" in status:
         status_color = (0, 0, 255)
 
     warning_text = ""
