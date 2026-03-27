@@ -9,6 +9,8 @@ from src.temporal import FlameTracker
 
 burner_zones = []
 mock_flame_pos = None
+drawing_center = None
+drawing_radius = 0
 
 def load_burners():
     global burner_zones
@@ -29,21 +31,34 @@ def save_burners():
         print(f"Failed to save burners: {e}")
 
 def handle_mouse_events(event, x, y, flags, param):
-    global burner_zones, mock_flame_pos
+    global burner_zones, mock_flame_pos, drawing_center, drawing_radius
     
     if event == cv2.EVENT_LBUTTONDOWN:
-        # Add a new burner zone
-        burner_zones.append((x, y))
-        print(f"Added Burner Zone at ({x}, {y})")
+        # Start drawing a new burner zone radius
+        drawing_center = (x, y)
+        drawing_radius = 0
         
+    elif event == cv2.EVENT_MOUSEMOVE:
+        if drawing_center is not None:
+            # Dynamically calculate the Euclidean distance for the radius
+            drawing_radius = int(((x - drawing_center[0])**2 + (y - drawing_center[1])**2)**0.5)
+            
+        if ENABLE_DEBUG_MOCK_FLAME:
+            # Track mouse for mock flame if active
+            mock_flame_pos = (x, y)
+            
+    elif event == cv2.EVENT_LBUTTONUP:
+        if drawing_center is not None:
+            # Default to 100
+            final_radius = drawing_radius if drawing_radius > 5 else BURNER_RADIUS_PIXELS
+            burner_zones.append((drawing_center[0], drawing_center[1], final_radius))
+            print(f"Added Burner Zone at {drawing_center} with radius {final_radius}")
+            drawing_center = None
+            drawing_radius = 0
+            
     elif event == cv2.EVENT_RBUTTONDOWN:
         # Clear all burner zones
         burner_zones = []
-        print("Cleared all Burner Zones.")
-        
-    elif event == cv2.EVENT_MOUSEMOVE and ENABLE_DEBUG_MOCK_FLAME:
-        # Track mouse for mock flame if active
-        mock_flame_pos = (x, y)
 
 def draw_status_panel(frame, status, detection_result, growth_status, flame_tracker, mock_flame_active):
     
@@ -205,11 +220,16 @@ def main():
                     cv2.circle(frame, (ax, ay), 4, (255, 0, 255), -1)
 
             # Draw Burner Zones
-            for (zx, zy) in burner_zones:
+            for zx, zy, r in burner_zones:
                 # Draw the radius
-                cv2.circle(frame, (zx, zy), BURNER_RADIUS_PIXELS, (255, 150, 0), 2)
+                cv2.circle(frame, (zx, zy), r, (255, 150, 0), 2)
                 # Draw the center point
                 cv2.circle(frame, (zx, zy), 4, (255, 150, 0), -1)
+
+            # Draw preview ring if actively dragging the mouse
+            global drawing_center, drawing_radius
+            if drawing_center is not None:
+                cv2.circle(frame, drawing_center, drawing_radius, (0, 255, 255), 2, cv2.LINE_AA)
 
             # Draw mock flame box explicitly if active
             if ENABLE_DEBUG_MOCK_FLAME and mock_flame_active and current_mock_box is not None:

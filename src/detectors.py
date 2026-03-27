@@ -152,7 +152,7 @@ class VisionSystem:
                 center = calculate_center(item["box"], anchor="bottom")
                 item["anchor_point"] = center
 
-                if not is_point_in_zones(center, burner_zones, BURNER_RADIUS_PIXELS):
+                if not is_point_in_zones(center, burner_zones):
                     is_safe_fire = False
                     break
 

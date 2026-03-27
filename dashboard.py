@@ -117,8 +117,8 @@ class VideoProcessor(VideoProcessorBase):
                 ax, ay = item["anchor_point"]
                 cv2.circle(img, (ax, ay), 4, (255, 0, 255), -1)
 
-        for (zx, zy) in self.burner_zones:
-            cv2.circle(img, (zx, zy), BURNER_RADIUS_PIXELS, (255, 150, 0), 2)
+        for zx, zy, r in self.burner_zones:
+            cv2.circle(img, (zx, zy), r, (255, 150, 0), 2)
 
         return av.VideoFrame.from_ndarray(img, format="bgr24")
 

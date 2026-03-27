@@ -17,13 +17,14 @@ def calculate_center(box: list, anchor: str = "center") -> tuple:
         
     return (center_x, center_y)
 
-def is_point_in_zones(point: tuple, zones: list, radius: int) -> bool:
+def is_point_in_zones(point: tuple, zones: list) -> bool:
     """
-    Check if a given point is within 'radius' distance of any point in 'zones'.
+    Check if a given point is within the radius of any point in 'zones'.
+    'zones' should be a list of (x, y, radius) tuples.
     """
     px, py = point
-    for zx, zy in zones:
+    for zx, zy, r in zones:
         distance = math.sqrt((px - zx)**2 + (py - zy)**2)
-        if distance <= radius:
+        if distance <= r:
             return True
     return False
