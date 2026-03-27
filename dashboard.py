@@ -9,10 +9,10 @@ from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
 
 st.set_page_config(page_title="Kitchen Guardian", layout="wide", initial_sidebar_state="expanded")
 
-from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE
+from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, SHUTOFF_ALPHA, SHUTOFF_THRESHOLD
 from src.detectors import VisionSystem
 from src.state_machine import SafetyGuardian
-from src.temporal import FlameTracker
+from src.temporal import FlameTracker, ShutoffDebouncer
 
 st.title("Kitchen Guardian")
 st.markdown("Real-time monitoring and safety oversight.")
@@ -50,6 +50,7 @@ class VideoProcessor(VideoProcessorBase):
         self.vision = VisionSystem()
         self.guardian = SafetyGuardian()
         self.tracker = FlameTracker()
+        self.debouncer = ShutoffDebouncer(alpha=SHUTOFF_ALPHA, threshold=SHUTOFF_THRESHOLD)
         self.burner_zones = load_burners()
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
@@ -62,6 +63,7 @@ class VideoProcessor(VideoProcessorBase):
             
         if reset_requested:
             self.tracker.reset()
+            self.debouncer.reset()
             with sys_state.lock:
                 sys_state.reset_requested = False
 
@@ -87,8 +89,16 @@ class VideoProcessor(VideoProcessorBase):
             
         if manual_shutoff:
             status = "CRITICAL_SHUTOFF (MANUAL)"
+            
+        # 3. EMA Debouncing
+        is_critical = "CRITICAL_SHUTOFF" in status
+        actual_shutoff = self.debouncer.update(is_critical)
+        
+        if is_critical and not actual_shutoff and not manual_shutoff:
+            # Downgrade to critical warning until fully triggered computationally
+            status = status.replace("CRITICAL_SHUTOFF", "CRITICAL_WARNING")
 
-        # 3. Thread-safe write to Streamlit UI State
+        # 4. Thread-safe write to Streamlit UI State
         stats = self.tracker.get_stats()
         with sys_state.lock:
             sys_state.status = status

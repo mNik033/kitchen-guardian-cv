@@ -86,3 +86,17 @@ class FlameTracker:
             "locked": self.is_baseline_locked,
             "smoothed_current": smoothed_area
         }
+
+class ShutoffDebouncer:
+    def __init__(self, alpha=0.4, threshold=0.85):
+        self.alpha = alpha
+        self.threshold = threshold
+        self.ema_value = 0.0
+        
+    def update(self, is_critical_this_frame: bool) -> bool:
+        current = 1.0 if is_critical_this_frame else 0.0
+        self.ema_value = self.alpha * current + (1.0 - self.alpha) * self.ema_value
+        return self.ema_value >= self.threshold
+        
+    def reset(self):
+        self.ema_value = 0.0

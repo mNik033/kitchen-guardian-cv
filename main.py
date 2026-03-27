@@ -2,10 +2,10 @@ import cv2
 import time
 import json
 import os
-from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, ENABLE_DEBUG_MOCK_FLAME
+from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, ENABLE_DEBUG_MOCK_FLAME, SHUTOFF_ALPHA, SHUTOFF_THRESHOLD
 from src.detectors import VisionSystem
 from src.state_machine import SafetyGuardian
-from src.temporal import FlameTracker
+from src.temporal import FlameTracker, ShutoffDebouncer
 
 burner_zones = []
 mock_flame_pos = None
@@ -84,11 +84,7 @@ def draw_status_panel(frame, status, detection_result, growth_status, flame_trac
     elif "CRITICAL" in status:
         status_color = (0, 0, 255)
 
-    warning_text = ""
-    if detection_result["flame_detected"] and not detection_result["is_safe_fire"]:
-        warning_text = " (FIRE OUTSIDE SAFE ZONE)"
-
-    draw(f"STATUS: {status}{warning_text}", status_color, 0.8)
+    draw(f"STATUS: {status}", status_color, 0.8)
 
     flame_text = "FLAME: DETECTED" if detection_result["flame_detected"] else "FLAME: NONE"
     flame_color = (0, 0, 255) if detection_result["flame_detected"] else (255, 255, 255)
@@ -133,6 +129,7 @@ def main():
     guardian = SafetyGuardian()
     print("Initializing Flame Tracker...")
     flame_tracker = FlameTracker()
+    debouncer = ShutoffDebouncer(alpha=SHUTOFF_ALPHA, threshold=SHUTOFF_THRESHOLD)
 
     # Load previously saved burners
     load_burners()
@@ -197,6 +194,18 @@ def main():
             
             if (detection_result["dangerous_fire"] or detection_result["flame_detected"]) and not is_safe_fire:
                 status = "CRITICAL_SHUTOFF (OUTSIDE SAFE ZONE)"
+                
+            # EMA Debouncing logic to suppress flickering UI
+            is_critical = "CRITICAL_SHUTOFF" in status
+            actual_shutoff = debouncer.update(is_critical)
+            
+            if is_critical and not actual_shutoff:
+                # Downgrade visually to a critical warning until the EMA breaches 0.85
+                status = status.replace("CRITICAL_SHUTOFF", "CRITICAL_WARNING")
+                
+            elif actual_shutoff:
+                # This locks in the irreversible status
+                pass
 
             # 3. Visualization
             # Draw Bounding Boxes
@@ -258,6 +267,7 @@ def main():
                 save_burners()
             elif key == ord("r"):
                 flame_tracker.reset()
+                debouncer.reset()
                 print("Flame tracker reset.")
             elif key == ord('f') and ENABLE_DEBUG_MOCK_FLAME:
                 mock_flame_active = not mock_flame_active
