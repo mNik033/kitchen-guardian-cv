@@ -39,8 +39,9 @@ class FlameTracker:
         smoothed_current_area = sum(self.recent_areas) / len(self.recent_areas)
 
         # 2. Contextual Baseline
-        if person_present:
+        if person_present or self.baseline_area <= 0:
             # Person is present -> Actively cooking
+            # OR this is the very first detection
             # Slowly update the baseline to reflect intentional changes in flame size
             self.is_baseline_locked = False
             self.baseline_history.append(total_current_area)

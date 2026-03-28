@@ -74,8 +74,8 @@ class VideoProcessor(VideoProcessorBase):
             mock_flame_box=None
         )
         
-        flame_boxes = detection_result["flame_boxes"]
-        growth_status = self.tracker.update(flame_boxes=flame_boxes, person_present=detection_result['person_detected'])
+        heat_boxes = detection_result["flame_boxes"] + detection_result["fire_boxes"]
+        growth_status = self.tracker.update(flame_boxes=heat_boxes, person_present=detection_result['person_detected'])
         
         status = self.guardian.update_status(
             flame_on=detection_result["flame_detected"],

@@ -177,11 +177,11 @@ def main():
                 mock_flame_box=current_mock_box
             )
 
-            # Filter boxes to only contain flames
-            flame_boxes = detection_result["flame_boxes"]
+            # Filter boxes to only contain heat sources (flames + fires)
+            heat_boxes = detection_result["flame_boxes"] + detection_result["fire_boxes"]
             
             # Update temporal logic (Growth tracking)
-            growth_status = flame_tracker.update(flame_boxes=flame_boxes, person_present=detection_result['person_detected'])
+            growth_status = flame_tracker.update(flame_boxes=heat_boxes, person_present=detection_result['person_detected'])
             
             status = guardian.update_status(
                 flame_on=detection_result["flame_detected"],
