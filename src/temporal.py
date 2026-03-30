@@ -1,6 +1,6 @@
 from typing import Literal, List, Optional
 from collections import deque
-from src.config import GROWTH_WARNING_MULTIPLIER, GROWTH_CRITICAL_MULTIPLIER, BASELINE_FRAMES, CURRENT_AREA_FRAMES
+from src.config import GROWTH_WARNING_MULTIPLIER, GROWTH_CRITICAL_MULTIPLIER, BASELINE_FRAMES, CURRENT_AREA_FRAMES, BASELINE_DECAY_RATE
 
 class FlameTracker:
     def __init__(self):
@@ -52,6 +52,17 @@ class FlameTracker:
             else:
                 # Person left -> Lock the baseline
                 self.is_baseline_locked = True
+                
+                # Adaptive Decay: slowly pull baseline DOWN toward current area.
+                # This prevents a stale high baseline from masking future re-ignition
+                # after the flame naturally dies down (e.g. gas running low).
+                # Only decay downward — if flame is growing, we keep the old baseline
+                # to preserve the growth detection signal.
+                if smoothed_current_area < self.baseline_area:
+                    self.baseline_area = (
+                        self.baseline_area * (1.0 - BASELINE_DECAY_RATE)
+                        + smoothed_current_area * BASELINE_DECAY_RATE
+                    )
             
         # If we haven't established a valid baseline yet, assume safe
         if self.baseline_area <= 0:
