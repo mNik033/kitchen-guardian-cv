@@ -6,6 +6,7 @@ import os
 import av
 import threading
 from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
+from streamlit_push_notifications import send_push
 
 st.set_page_config(page_title="Kitchen Guardian", layout="wide", initial_sidebar_state="expanded")
 
@@ -27,6 +28,8 @@ def load_burners():
     return []
 
 # --- Thread-Safe Application State ---
+NOTIFICATION_COOLDOWN = 30
+
 class SystemState:
     def __init__(self):
         self.lock = threading.Lock()
@@ -38,6 +41,8 @@ class SystemState:
         self.baseline_area = 0
         self.manual_shutoff = False
         self.reset_requested = False
+        self.last_notification_level = "SAFE"
+        self.last_notification_time = 0.0
 
 if "sys_state" not in st.session_state:
     st.session_state.sys_state = SystemState()
@@ -258,6 +263,45 @@ with col2:
             st.metric("Person", "Present" if p_det else "Away")
             delta = f"{f_area - b_area:.0f}" if b_area > 0 else None
             st.metric("Flame Area", f"{f_area:.0f}" if b_area > 0 else "0", delta=delta)
+
+        # --- Browser Push Notifications ---
+        now = time.time()
+        if "CRITICAL" in status:
+            with sys_state.lock:
+                should_send = (
+                    sys_state.last_notification_level != "CRITICAL"
+                    or now - sys_state.last_notification_time > NOTIFICATION_COOLDOWN
+                )
+            if should_send:
+                send_push(
+                    title="CRITICAL ALERT — Kitchen Guardian",
+                    body=f"Shutoff triggered: {status}",
+                    tag="kitchen-guardian-critical",
+                )
+                with sys_state.lock:
+                    sys_state.last_notification_level = "CRITICAL"
+                    sys_state.last_notification_time = now
+
+        elif "WARNING" in status:
+            with sys_state.lock:
+                should_send = (
+                    sys_state.last_notification_level != "WARNING"
+                    or now - sys_state.last_notification_time > NOTIFICATION_COOLDOWN
+                )
+            if should_send:
+                send_push(
+                    title="WARNING — Kitchen Guardian",
+                    body=f"Attention needed: {status}",
+                    tag="kitchen-guardian-warning",
+                )
+                with sys_state.lock:
+                    sys_state.last_notification_level = "WARNING"
+                    sys_state.last_notification_time = now
+
+        else:
+            # Reset when back to SAFE so next warning re-fires
+            with sys_state.lock:
+                sys_state.last_notification_level = "SAFE"
             
     if webrtc_ctx and webrtc_ctx.state.playing:
         render_live_metrics()
