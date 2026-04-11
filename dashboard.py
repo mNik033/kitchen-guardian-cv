@@ -193,8 +193,40 @@ class VideoProcessor(VideoProcessorBase):
             self.thread.join(timeout=1.0)
 
 def get_media_player():
-    from aiortc.contrib.media import MediaPlayer
-    return MediaPlayer(VIDEO_SOURCE, loop=True)
+    from aiortc.mediastreams import VideoStreamTrack
+    import cv2
+    import av
+    
+    class LoopingFileTrack(VideoStreamTrack):
+        def __init__(self, path):
+            super().__init__()
+            self.path = path
+            self.cap = cv2.VideoCapture(path)
+            
+        async def recv(self):
+            pts, time_base = await self.next_timestamp()
+            
+            ret, frame = self.cap.read()
+            if not ret:
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                ret, frame = self.cap.read()
+                if not ret:
+                    raise Exception("Failed to read video")
+                    
+            vframe = av.VideoFrame.from_ndarray(frame, format="bgr24")
+            vframe.pts = pts
+            vframe.time_base = time_base
+            return vframe
+            
+        def __del__(self):
+            if hasattr(self, 'cap') and self.cap.isOpened():
+                self.cap.release()
+
+    class PlayerProxy:
+        def __init__(self):
+            self.video = LoopingFileTrack(VIDEO_SOURCE)
+            
+    return PlayerProxy()
 
 # --- UI Layout ---
 col1, col2 = st.columns([2, 1])
