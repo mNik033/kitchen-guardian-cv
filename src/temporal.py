@@ -1,6 +1,8 @@
+import time
+import math
 from typing import Literal, List, Optional
 from collections import deque
-from src.config import GROWTH_WARNING_MULTIPLIER, GROWTH_CRITICAL_MULTIPLIER, BASELINE_FRAMES, CURRENT_AREA_FRAMES, BASELINE_DECAY_RATE
+from src.config import GROWTH_WARNING_MULTIPLIER, GROWTH_CRITICAL_MULTIPLIER, BASELINE_FRAMES, CURRENT_AREA_FRAMES, BASELINE_DECAY_RATE, FPS_MAX, FPS_STANDBY_MAX_DELAY, AFR_GRACE_PERIOD_SEC, AFR_DECAY_RATE
 
 class FlameTracker:
     def __init__(self):
@@ -114,3 +116,34 @@ class ShutoffDebouncer:
         
     def reset(self):
         self.ema_value = 0.0
+
+class AdaptiveFrameRateController:
+    def __init__(self):
+        self.fps_max = FPS_MAX
+        self.max_delay = FPS_STANDBY_MAX_DELAY
+        self.grace_period = AFR_GRACE_PERIOD_SEC
+        self.decay_rate = AFR_DECAY_RATE
+        self.last_activity_time = time.time()
+        self.current_delay = 1.0 / self.fps_max
+
+    def register_activity(self):
+        self.last_activity_time = time.time()
+        
+    def get_sleep_delay(self) -> float:
+        t_idle = time.time() - self.last_activity_time
+        base_delay = 1.0 / self.fps_max
+        if t_idle < self.grace_period:
+            self.current_delay = base_delay
+        else:
+            self.current_delay = min(base_delay * math.exp(self.decay_rate * (t_idle - self.grace_period)), self.max_delay)
+        return self.current_delay
+        
+    def get_status_string(self) -> str:
+        """Returns the current state for the UI (e.g. Active or Low Power Mode)"""
+        base_delay = 1.0 / self.fps_max
+        if self.current_delay <= base_delay * 1.5:
+            return f"Active ({self.fps_max:.0f} FPS)"
+        
+        current_fps = 1.0 / self.current_delay
+        return f"Low Power Mode ({current_fps:.1f} FPS)"
+

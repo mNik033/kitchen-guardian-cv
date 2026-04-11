@@ -10,10 +10,10 @@ from streamlit_push_notifications import send_push
 
 st.set_page_config(page_title="Kitchen Guardian", layout="wide", initial_sidebar_state="expanded")
 
-from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, SHUTOFF_ALPHA, SHUTOFF_THRESHOLD
+from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, SHUTOFF_ALPHA, SHUTOFF_THRESHOLD, ENABLE_MOTION_WAKEUP
 from src.detectors import VisionSystem
 from src.state_machine import SafetyGuardian
-from src.temporal import FlameTracker, ShutoffDebouncer
+from src.temporal import FlameTracker, ShutoffDebouncer, AdaptiveFrameRateController
 
 st.title("Kitchen Guardian")
 st.markdown("Real-time monitoring and safety oversight.")
@@ -41,6 +41,7 @@ class SystemState:
         self.baseline_area = 0
         self.manual_shutoff = False
         self.reset_requested = False
+        self.afr_status = "Active"
         self.last_notification_level = "SAFE"
         self.last_notification_time = 0.0
 
@@ -56,12 +57,15 @@ class VideoProcessor(VideoProcessorBase):
         self.guardian = SafetyGuardian()
         self.tracker = FlameTracker()
         self.debouncer = ShutoffDebouncer(alpha=SHUTOFF_ALPHA, threshold=SHUTOFF_THRESHOLD)
+        self.afr = AdaptiveFrameRateController()
         self.burner_zones = load_burners()
         
         # Async Threading Architecture
         self.frame_lock = threading.Lock()
         self.latest_frame = None
         self.processed_img = None
+        self.prev_gray = None
+        self.last_yolo_time = 0.0
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target=self._process_loop, daemon=True)
         self.thread.start()
@@ -85,6 +89,32 @@ class VideoProcessor(VideoProcessorBase):
                 # Sleep briefly to yield CPU if the camera is lagging
                 time.sleep(0.02)
                 continue
+                
+            # Motion Wakeup logic (Low Power)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            motion_detected = False
+            if ENABLE_MOTION_WAKEUP and self.prev_gray is not None:
+                diff = cv2.absdiff(gray, self.prev_gray)
+                _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                motion_sum = cv2.sumElems(thresh)[0]
+                if motion_sum > 100000: # Threshold for significant change
+                    motion_detected = True
+            self.prev_gray = gray
+            
+            if motion_detected:
+                self.afr.register_activity()
+                
+            now = time.time()
+            sleep_delay = self.afr.get_sleep_delay()
+            
+            if now - self.last_yolo_time < sleep_delay:
+                # Skip YOLO, just push state and sleep a little
+                with sys_state.lock:
+                    sys_state.afr_status = self.afr.get_status_string()
+                time.sleep(0.02)
+                continue
+
+            self.last_yolo_time = now
 
             # 1. Thread-safe read of user inputs
             with sys_state.lock:
@@ -94,6 +124,7 @@ class VideoProcessor(VideoProcessorBase):
             if reset_requested:
                 self.tracker.reset()
                 self.debouncer.reset()
+                self.afr.register_activity()
                 with sys_state.lock:
                     sys_state.reset_requested = False
 
@@ -128,6 +159,10 @@ class VideoProcessor(VideoProcessorBase):
             # Downgrade to critical warning until fully triggered computationally
                 status = status.replace("CRITICAL_SHUTOFF", "CRITICAL_WARNING")
 
+            # Register activity if any threat or person is detected
+            if detection_result['person_detected'] or detection_result['flame_detected'] or detection_result['dangerous_fire']:
+                self.afr.register_activity()
+
             # 5. Push data to Streamlit UI bindings
             stats = self.tracker.get_stats()
             with sys_state.lock:
@@ -137,6 +172,7 @@ class VideoProcessor(VideoProcessorBase):
                 sys_state.person_detected = detection_result["person_detected"]
                 sys_state.flame_area = stats['smoothed_current']
                 sys_state.baseline_area = stats['baseline_area']
+                sys_state.afr_status = self.afr.get_status_string()
 
             # 6. Render Visuals
             for item in detection_result['boxes']:
@@ -278,6 +314,7 @@ with col2:
             p_det = sys_state.person_detected
             f_area = sys_state.flame_area
             b_area = sys_state.baseline_area
+            afr_status = sys_state.afr_status
             
         status_color = "green"
         if "WARNING" in status:
@@ -285,7 +322,8 @@ with col2:
         elif "CRITICAL" in status:
             status_color = "red"
             
-        st.markdown(f"### System: :{status_color}[{status}]")
+        pow_color = "blue" if "Low Power" in afr_status else "green"
+        st.markdown(f"### System: :{status_color}[{status}] | Power: :{pow_color}[{afr_status}]")
         
         c1, c2 = st.columns(2)
         with c1:

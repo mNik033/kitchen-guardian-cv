@@ -38,5 +38,12 @@ PERSON_MODEL_PATH = "yolov8n.pt"
 FLAME_MODEL_PATH = str(MODELS_DIR / "stove_fire_best.pt")
 FIRE_MODEL_PATH = str(MODELS_DIR / "fire_best.pt")
 
+# Adaptive Frame Rate
+FPS_MAX = 30
+FPS_STANDBY_MAX_DELAY = 5
+AFR_GRACE_PERIOD_SEC = 120
+AFR_DECAY_RATE = 0.05
+ENABLE_MOTION_WAKEUP = True
+
 SHUTOFF_ALPHA = 0.04      # Controls EMA smoothing speed
 SHUTOFF_THRESHOLD = 0.85   # Confidence required to hard-trigger shutdown

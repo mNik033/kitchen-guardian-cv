@@ -2,10 +2,10 @@ import cv2
 import time
 import json
 import os
-from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, ENABLE_DEBUG_MOCK_FLAME, SHUTOFF_ALPHA, SHUTOFF_THRESHOLD
+from src.config import BURNER_RADIUS_PIXELS, BURNERS_FILE, VIDEO_SOURCE, ENABLE_DEBUG_MOCK_FLAME, SHUTOFF_ALPHA, SHUTOFF_THRESHOLD, ENABLE_MOTION_WAKEUP
 from src.detectors import VisionSystem
 from src.state_machine import SafetyGuardian
-from src.temporal import FlameTracker, ShutoffDebouncer
+from src.temporal import FlameTracker, ShutoffDebouncer, AdaptiveFrameRateController
 
 burner_zones = []
 mock_flame_pos = None
@@ -60,7 +60,7 @@ def handle_mouse_events(event, x, y, flags, param):
         # Clear all burner zones
         burner_zones = []
 
-def draw_status_panel(frame, status, detection_result, growth_status, flame_tracker, mock_flame_active):
+def draw_status_panel(frame, status, detection_result, growth_status, flame_tracker, mock_flame_active, afr_status):
     
     y = 40
     line_gap = 35
@@ -110,6 +110,9 @@ def draw_status_panel(frame, status, detection_result, growth_status, flame_trac
     if ENABLE_DEBUG_MOCK_FLAME:
         mock_text = f"MOCK FLAME: {'ON' if mock_flame_active else 'OFF'}"
         draw(mock_text, (255, 200, 0))
+        
+    pow_color = (255, 200, 0) if "Low Power" in afr_status else (0, 255, 0)
+    draw(f"PWR: {afr_status}", pow_color)
 
     controls = "L-Click add burner | R-Click clear | s save | f mock | r reset | q quit"
     cv2.putText(frame, controls, (20, frame.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (200, 200, 200), 2)
@@ -130,12 +133,20 @@ def main():
     print("Initializing Flame Tracker...")
     flame_tracker = FlameTracker()
     debouncer = ShutoffDebouncer(alpha=SHUTOFF_ALPHA, threshold=SHUTOFF_THRESHOLD)
+    afr = AdaptiveFrameRateController()
 
     # Load previously saved burners
     load_burners()
 
     # Mock flame state
     mock_flame_active = False
+    
+    # Render state variables between YOLO runs
+    last_detection_result = { "boxes": [], "flame_detected": False, "dangerous_fire": False, "person_detected": False, "flame_boxes": [], "fire_boxes": [], "is_safe_fire": True }
+    last_growth_status = "SAFE"
+    last_status = "SAFE"
+    prev_gray = None
+    last_yolo_time = 0.0
 
     print("System detection started.")
     print("UI Controls:")
@@ -162,6 +173,20 @@ def main():
                 # For live streams, wait briefly and try again
                 time.sleep(0.02)
                 continue
+                
+            # Motion Wakeup logic (Low Power)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            motion_detected = False
+            if ENABLE_MOTION_WAKEUP and prev_gray is not None:
+                diff = cv2.absdiff(gray, prev_gray)
+                _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                motion_sum = cv2.sumElems(thresh)[0]
+                if motion_sum > 100000:
+                    motion_detected = True
+            prev_gray = gray
+
+            if motion_detected:
+                afr.register_activity()
 
             # Generate the mock flame box if active
             current_mock_box = None
@@ -170,42 +195,52 @@ def main():
                 # Create a 50x50 box around the mouse cursor
                 current_mock_box = [mx - 25, my - 25, mx + 25, my + 25]
 
-            # 1. Detect Objects & Validate Zones
-            detection_result = vision_system.detect_objects(
-                frame=frame, 
-                burner_zones=burner_zones, 
-                mock_flame_box=current_mock_box
-            )
+            now = time.time()
+            sleep_delay = afr.get_sleep_delay()
 
-            # Filter boxes to only contain heat sources (flames + fires)
-            heat_boxes = detection_result["flame_boxes"] + detection_result["fire_boxes"]
-            
-            # Update temporal logic (Growth tracking)
-            growth_status = flame_tracker.update(flame_boxes=heat_boxes, person_present=detection_result['person_detected'])
-            
-            status = guardian.update_status(
-                flame_on=detection_result["flame_detected"],
-                person_present=detection_result["person_detected"],
-                growth_status=growth_status,
-            )
-            
-            # If the fire is NOT safe spatially, we override the temporal state machine
-            is_safe_fire = detection_result['is_safe_fire']
-            
-            if (detection_result["dangerous_fire"] or detection_result["flame_detected"]) and not is_safe_fire:
-                status = "CRITICAL_SHUTOFF (OUTSIDE SAFE ZONE)"
+            if now - last_yolo_time >= sleep_delay:
+                last_yolo_time = now
+
+                # 1. Detect Objects & Validate Zones
+                last_detection_result = vision_system.detect_objects(
+                    frame=frame, 
+                    burner_zones=burner_zones, 
+                    mock_flame_box=current_mock_box
+                )
+
+                if last_detection_result['person_detected'] or last_detection_result['flame_detected'] or last_detection_result['dangerous_fire']:
+                    afr.register_activity()
+
+                # Filter boxes to only contain heat sources (flames + fires)
+                heat_boxes = last_detection_result["flame_boxes"] + last_detection_result["fire_boxes"]
                 
-            # EMA Debouncing logic to suppress flickering UI
-            is_critical = "CRITICAL_SHUTOFF" in status
-            actual_shutoff = debouncer.update(is_critical)
-            
-            if is_critical and not actual_shutoff:
-                # Downgrade visually to a critical warning until the EMA breaches 0.85
-                status = status.replace("CRITICAL_SHUTOFF", "CRITICAL_WARNING")
+                # Update temporal logic (Growth tracking)
+                last_growth_status = flame_tracker.update(flame_boxes=heat_boxes, person_present=last_detection_result['person_detected'])
                 
-            elif actual_shutoff:
-                # This locks in the irreversible status
-                pass
+                last_status = guardian.update_status(
+                    flame_on=last_detection_result["flame_detected"],
+                    person_present=last_detection_result["person_detected"],
+                    growth_status=last_growth_status,
+                )
+                
+                # If the fire is NOT safe spatially, we override the temporal state machine
+                is_safe_fire = last_detection_result['is_safe_fire']
+                
+                if (last_detection_result["dangerous_fire"] or last_detection_result["flame_detected"]) and not is_safe_fire:
+                    last_status = "CRITICAL_SHUTOFF (OUTSIDE SAFE ZONE)"
+                    
+                # EMA Debouncing logic to suppress flickering UI
+                is_critical = "CRITICAL_SHUTOFF" in last_status
+                actual_shutoff = debouncer.update(is_critical)
+                
+                if is_critical and not actual_shutoff:
+                    # Downgrade visually to a critical warning until the EMA breaches 0.85
+                    last_status = last_status.replace("CRITICAL_SHUTOFF", "CRITICAL_WARNING")
+                    
+            # Use the latest updated inference results for drawing
+            detection_result = last_detection_result
+            status = last_status
+            growth_status = last_growth_status
 
             # 3. Visualization
             # Draw Bounding Boxes
@@ -254,7 +289,7 @@ def main():
                     2,
                 )
 
-            draw_status_panel(frame, status, detection_result, growth_status, flame_tracker, mock_flame_active)
+            draw_status_panel(frame, status, detection_result, growth_status, flame_tracker, mock_flame_active, afr.get_status_string())
 
             # Show Frame
             cv2.imshow('Kitchen Guardian', frame)
@@ -268,6 +303,7 @@ def main():
             elif key == ord("r"):
                 flame_tracker.reset()
                 debouncer.reset()
+                afr.register_activity()
                 print("Flame tracker reset.")
             elif key == ord('f') and ENABLE_DEBUG_MOCK_FLAME:
                 mock_flame_active = not mock_flame_active
