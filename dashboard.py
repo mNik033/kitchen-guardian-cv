@@ -44,6 +44,7 @@ class SystemState:
         self.afr_status = "Active"
         self.last_notification_level = "SAFE"
         self.last_notification_time = 0.0
+        self.logs = []
 
 if "sys_state" not in st.session_state:
     st.session_state.sys_state = SystemState()
@@ -166,6 +167,29 @@ class VideoProcessor(VideoProcessorBase):
             # 5. Push data to Streamlit UI bindings
             stats = self.tracker.get_stats()
             with sys_state.lock:
+                if sys_state.status != status:
+                    from datetime import datetime
+                    reason = "Normal operating conditions"
+                    if "MANUAL" in status:
+                        reason = "User initiated emergency shutoff"
+                    elif "OUTSIDE SAFE ZONE" in status:
+                        reason = "Fire outside safe zone (verifying)" if "WARNING" in status else "Fire detected outside safe burner zones"
+                    elif "RAPID FLAME SPREAD" in status:
+                        reason = "Rapid flame spread detected (verifying)" if "WARNING" in status else "Flame area grew rapidly beyond limits"
+                    elif "LEFT UNATTENDED" in status:
+                        reason = "Unattended flame time critical (verifying)" if "WARNING" in status else "Flame left unattended beyond critical limit"
+                    elif status == "WARNING":
+                        reason = "Flame unattended or growth warning"
+                        
+                    log_entry = {
+                        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "Status": status,
+                        "Reason": reason
+                    }
+                    sys_state.logs.insert(0, log_entry)
+                    if len(sys_state.logs) > 50:
+                        sys_state.logs.pop()
+
                 sys_state.status = status
                 sys_state.flame_detected = detection_result["flame_detected"]
                 sys_state.dangerous_fire = detection_result["dangerous_fire"]
@@ -372,6 +396,16 @@ with col2:
             # Reset when back to SAFE so next warning re-fires
             with sys_state.lock:
                 sys_state.last_notification_level = "SAFE"
+                
+        st.divider()
+        st.markdown("### Activity Log")
+        with sys_state.lock:
+            logs_copy = list(sys_state.logs)
+            
+        if logs_copy:
+            st.dataframe(logs_copy, use_container_width=True, hide_index=True)
+        else:
+            st.info("No activity recorded yet.")
             
     if webrtc_ctx and webrtc_ctx.state.playing:
         render_live_metrics()
